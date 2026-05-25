@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import type { Plugin } from 'vite'
+import { DEV_SERVER_PORT } from './src/shared/constants/window'
 
 // Read all production dependencies from package.json
 // so they get bundled into the main process output.
@@ -90,6 +91,10 @@ export default defineConfig({
       }
     },
     plugins: [react()],
+    server: {
+      port: DEV_SERVER_PORT,
+      strictPort: true
+    },
     build: {
       rollupOptions: {
         input: {

@@ -9,4 +9,4 @@ export const DEFAULT_WINDOW_WIDTH = 1400;
 export const DEFAULT_WINDOW_HEIGHT = 900;
 
 /** Development server port */
-export const DEV_SERVER_PORT = 5173;
+export const DEV_SERVER_PORT = 5273;
