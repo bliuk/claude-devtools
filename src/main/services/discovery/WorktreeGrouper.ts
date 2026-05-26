@@ -135,33 +135,60 @@ export class WorktreeGrouper {
     const repositoryGroups: RepositoryGroup[] = [];
 
     for (const [groupId, group] of repoGroups) {
-      const worktrees: Worktree[] = await Promise.all(group.projects.map(async (project) => {
-        const branch = group.branches.get(project.id) ?? null;
-        const isMainWorktree = !(await gitIdentityResolver.isWorktree(project.path));
-        // Use filtered sessions instead of raw sessions
-        const filteredSessions = projectFilteredSessions.get(project.id) ?? [];
-        // Detect worktree source for badge display
-        const source = await gitIdentityResolver.detectWorktreeSource(project.path);
-        // Use source-aware display name generation
-        const displayName = await gitIdentityResolver.getWorktreeDisplayName(
-          project.path,
-          source,
-          branch,
-          isMainWorktree
-        );
+      const worktrees: Worktree[] = await Promise.all(
+        group.projects.map(async (project) => {
+          const branch = group.branches.get(project.id) ?? null;
+          const isMainWorktree = !(await gitIdentityResolver.isWorktree(project.path));
+          // Use filtered sessions instead of raw sessions
+          const filteredSessions = projectFilteredSessions.get(project.id) ?? [];
+          // Detect worktree source for badge display
+          const source = await gitIdentityResolver.detectWorktreeSource(project.path);
+          // Use source-aware display name generation
+          const displayName = await gitIdentityResolver.getWorktreeDisplayName(
+            project.path,
+            source,
+            branch,
+            isMainWorktree
+          );
 
-        return {
-          id: project.id,
-          path: project.path,
-          name: displayName,
-          gitBranch: branch ?? undefined,
-          isMainWorktree,
-          source,
-          sessions: filteredSessions,
-          createdAt: project.createdAt,
-          mostRecentSession: project.mostRecentSession,
-        };
-      }));
+          return {
+            id: project.id,
+            path: project.path,
+            name: displayName,
+            gitBranch: branch ?? undefined,
+            isMainWorktree,
+            source,
+            sessions: filteredSessions,
+            createdAt: project.createdAt,
+            mostRecentSession: project.mostRecentSession,
+          };
+        })
+      );
+
+      // A git repository has exactly one main worktree. If several projects are
+      // flagged as main, they are not real git worktrees but plain subdirectories
+      // sharing one repo root (e.g. .asa "spaces" like .buglyn/BALLISTA-*), each of
+      // which isWorktree() reports false for. Left uncorrected, groupWorktreesBySource
+      // keeps only the first "main" and hides every other subdir's sessions. Keep the
+      // shortest path (the repo root, an ancestor of all the others) as the real main
+      // and demote the rest to distinct worktrees named by their path under the root.
+      const mainFlagged = worktrees.filter((wt) => wt.isMainWorktree);
+      if (mainFlagged.length > 1) {
+        const repoRoot = mainFlagged.reduce((shortest, wt) =>
+          wt.path.length < shortest.path.length ? wt : shortest
+        );
+        for (const wt of worktrees) {
+          if (wt.isMainWorktree && wt !== repoRoot) {
+            wt.isMainWorktree = false;
+            // These subdirs all sit on the same branch, so branch-derived names
+            // collapse to "main". Use the path relative to the repo root instead.
+            const rel = path.relative(repoRoot.path, wt.path);
+            if (rel && !rel.startsWith('..')) {
+              wt.name = rel;
+            }
+          }
+        }
+      }
 
       // Filter out worktrees with 0 visible sessions
       const nonEmptyWorktrees = worktrees.filter((wt) => wt.sessions.length > 0);
