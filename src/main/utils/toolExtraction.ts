@@ -10,7 +10,7 @@ import type { ContentBlock, ToolCall, ToolResult } from '../types';
  * Extract tool calls from content blocks.
  */
 export function extractToolCalls(content: ContentBlock[] | string): ToolCall[] {
-  if (typeof content === 'string') {
+  if (!Array.isArray(content)) {
     return [];
   }
 
@@ -54,7 +54,7 @@ export function extractToolCalls(content: ContentBlock[] | string): ToolCall[] {
  * Extract tool results from content blocks.
  */
 export function extractToolResults(content: ContentBlock[] | string): ToolResult[] {
-  if (typeof content === 'string') {
+  if (!Array.isArray(content)) {
     return [];
   }
 
