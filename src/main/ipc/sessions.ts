@@ -177,13 +177,29 @@ async function handleGetSessionsByIds(
     const { projectScanner } = registry.getActive();
     const fsType = projectScanner.getFileSystemProvider().type;
     const metadataLevel = options?.metadataLevel ?? (fsType === 'ssh' ? 'light' : 'deep');
-    const results = await Promise.all(
+    // allSettled so one unparsable session does not drop the whole batch to [].
+    const settled = await Promise.allSettled(
       validIds.map((id) =>
         projectScanner.getSessionWithOptions(validatedProject.value!, id, { metadataLevel })
       )
     );
 
-    return results.filter((s): s is Session => s !== null);
+    const results: Session[] = [];
+    for (let i = 0; i < settled.length; i++) {
+      const result = settled[i];
+      if (result.status === 'fulfilled') {
+        if (result.value !== null) {
+          results.push(result.value);
+        }
+      } else {
+        logger.error(
+          `Failed to build session ${validIds[i]} in project ${projectId}:`,
+          result.reason
+        );
+      }
+    }
+
+    return results;
   } catch (error) {
     logger.error(`Error in get-sessions-by-ids for project ${projectId}:`, error);
     return [];

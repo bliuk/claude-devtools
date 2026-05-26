@@ -415,7 +415,10 @@ export class ProjectScanner {
       const sessionPaths = sessionFiles.map((file) => path.join(projectPath, file.name));
       const decodedPath = await this.resolveProjectPathForId(projectId, sessionPaths);
 
-      const sessions = await Promise.all(
+      // Use allSettled so a single corrupt/unparsable session file does not
+      // wipe out the entire project's session list (one rejection in Promise.all
+      // would reject the whole batch and return []).
+      const settled = await Promise.allSettled(
         sessionFiles.map(async (file) => {
           const sessionId = extractSessionId(file.name);
           const filePath = path.join(projectPath, file.name);
@@ -449,8 +452,21 @@ export class ProjectScanner {
         })
       );
 
-      // Filter out null results (noise-only sessions)
-      const validSessions = sessions.filter((s): s is Session => s !== null);
+      // Keep successfully built sessions; log (but don't drop the list for) failures.
+      const validSessions: Session[] = [];
+      for (let i = 0; i < settled.length; i++) {
+        const result = settled[i];
+        if (result.status === 'fulfilled') {
+          if (result.value !== null) {
+            validSessions.push(result.value);
+          }
+        } else {
+          logger.error(
+            `Failed to build session metadata for ${sessionFiles[i].name} in project ${projectId}:`,
+            result.reason
+          );
+        }
+      }
 
       // Sort by created date (most recent first)
       validSessions.sort((a, b) => b.createdAt - a.createdAt);
