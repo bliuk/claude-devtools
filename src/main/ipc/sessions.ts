@@ -287,7 +287,13 @@ async function handleGetSessionDetail(
     return {
       ...sessionDetail,
       messages: [],
-      processes: sessionDetail.processes.map((p) => ({ ...p, messages: [] })),
+      // Strip messages and nestedSubagents from the flat list (used only for metrics/summary);
+      // nested subagents still travel within chunk.processes for rendering.
+      processes: sessionDetail.processes.map((p) => ({
+        ...p,
+        messages: [],
+        nestedSubagents: undefined,
+      })),
       fingerprint,
     };
   } catch (error) {

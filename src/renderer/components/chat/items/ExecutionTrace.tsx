@@ -9,10 +9,11 @@ import {
   TOOL_CALL_BORDER,
   TOOL_CALL_TEXT,
 } from '@renderer/constants/cssVariables';
-import { truncateText } from '@renderer/utils/aiGroupEnhancer';
-import { formatTokensCompact } from '@renderer/utils/formatters';
+import { CARD_BG, CARD_BORDER_STYLE, CARD_HEADER_BG } from '@renderer/constants/cssVariables';
+import { buildDisplayItemsFromMessages, truncateText } from '@renderer/utils/aiGroupEnhancer';
+import { formatDuration, formatTokensCompact } from '@renderer/utils/formatters';
 import { format } from 'date-fns';
-import { ChevronRight, Layers, MailOpen } from 'lucide-react';
+import { Bot, ChevronRight, Layers, MailOpen } from 'lucide-react';
 
 import { MarkdownViewer } from '../viewers/MarkdownViewer';
 
@@ -146,16 +147,71 @@ export const ExecutionTrace: React.FC<ExecutionTraceProps> = React.memo(function
             );
           }
 
-          case 'subagent':
+          case 'subagent': {
+            const nested = item.subagent;
+            const itemId = `nested-subagent-${nested.id}-${index}`;
+            const isExpanded = expandedItemId === itemId;
+            const nestedItems = buildDisplayItemsFromMessages(
+              nested.messages ?? [],
+              nested.nestedSubagents ?? []
+            );
+            const nestedType = nested.subagentType ?? 'Task';
+            const nestedDesc = nested.description ?? nested.id;
             return (
               <div
-                key={`nested-subagent-${index}`}
-                className="px-2 py-1 text-xs"
-                style={{ color: CARD_ICON_MUTED }}
+                key={itemId}
+                className="overflow-hidden rounded-md"
+                style={{ backgroundColor: CARD_BG, border: CARD_BORDER_STYLE }}
               >
-                Nested: {item.subagent.description ?? item.subagent.id}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleItemClick(itemId)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleItemClick(itemId);
+                    }
+                  }}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors"
+                  style={{ backgroundColor: isExpanded ? CARD_HEADER_BG : 'transparent' }}
+                >
+                  <ChevronRight
+                    className={`size-3.5 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                    style={{ color: CARD_ICON_MUTED }}
+                  />
+                  <Bot className="size-4 shrink-0" style={{ color: COLOR_TEXT_MUTED }} />
+                  <span
+                    className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+                    style={{ color: CARD_ICON_MUTED, border: CARD_BORDER_STYLE }}
+                  >
+                    {nestedType}
+                  </span>
+                  <span className="flex-1 truncate text-xs" style={{ color: COLOR_TEXT_MUTED }}>
+                    {truncateText(nestedDesc, 60)}
+                  </span>
+                  <span
+                    className="shrink-0 font-mono text-[11px] tabular-nums"
+                    style={{ color: CARD_ICON_MUTED }}
+                  >
+                    {formatDuration(nested.durationMs)}
+                  </span>
+                </div>
+                {isExpanded && (
+                  <div className="p-2" style={{ borderTop: CARD_BORDER_STYLE }}>
+                    <ExecutionTrace
+                      items={nestedItems}
+                      aiGroupId={_aiGroupId}
+                      highlightToolUseId={highlightToolUseId}
+                      highlightColor={highlightColor}
+                      notificationColorMap={notificationColorMap}
+                      registerToolRef={registerToolRef}
+                    />
+                  </div>
+                )}
               </div>
             );
+          }
 
           case 'subagent_input': {
             const itemId = `subagent-input-${index}`;

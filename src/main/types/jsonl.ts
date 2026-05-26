@@ -262,6 +262,20 @@ export function isConversationalEntry(entry: ChatHistoryEntry): entry is Convers
  *     {session_uuid}.jsonl              <- Main agent
  *     agent_{agent_uuid}.jsonl           <- Subagents (at root)
  *
+ * NESTED STRUCTURE (.asa / Agentic Stack Assistant, viewed via CLAUDE_ROOT=~/.asa):
+ *   {project_name}/
+ *     {session_id}.jsonl                 <- Main agent (uses tool name "subagent" for Task)
+ *     {session_id}/
+ *       subagents/
+ *         agent-sub-{toolUseId}.jsonl    <- Subagent (agentId = "sub-{toolUseId}")
+ *         run-N/subagents/
+ *           agent-sub-{toolUseId}.jsonl  <- Nested subagent (a subagent's own subagents)
+ *   SubagentLocator.listSubagentFiles recurses run-N/subagents/; SubagentResolver links each
+ *   subagent to its spawning tool_use by stripping the "sub-" prefix, and groups nested
+ *   subagents under their parent (Process.nestedSubagents). The main JSONL also emits
+ *   type:"progress" streaming previews of subagent activity — these are intentionally ignored
+ *   (parseMessageType drops them); the full transcript lives in the subagents/ files.
+ *
  * Identification:
  * - Main agent: isSidechain: false (or undefined)
  * - Subagent: isSidechain: true

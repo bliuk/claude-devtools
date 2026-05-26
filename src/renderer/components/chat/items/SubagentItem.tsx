@@ -120,8 +120,10 @@ export const SubagentItem: React.FC<SubagentItemProps> = ({
     if ((!isExpanded && !containsHighlightedError) || !subagent.messages?.length) {
       return [];
     }
-    return buildDisplayItemsFromMessages(subagent.messages, []);
-  }, [isExpanded, containsHighlightedError, subagent.messages]);
+    // Pass nested subagents so a subagent that spawned its own subagents renders them
+    // (and its spawning Task call is de-duplicated) instead of showing a bare tool call.
+    return buildDisplayItemsFromMessages(subagent.messages, subagent.nestedSubagents ?? []);
+  }, [isExpanded, containsHighlightedError, subagent.messages, subagent.nestedSubagents]);
 
   // Build summary
   const itemsSummary = useMemo(() => {

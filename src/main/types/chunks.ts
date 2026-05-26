@@ -67,6 +67,12 @@ export interface Process {
     memberName: string;
     memberColor: string;
   };
+  /**
+   * Subagents spawned from within this subagent's own transcript (nested subagents).
+   * Populated by SubagentResolver.assignNestedSubagents; enables rendering the full
+   * nesting tree (e.g. .asa: main -> subagent -> subagent) to arbitrary depth.
+   */
+  nestedSubagents?: Process[];
 }
 
 // =============================================================================

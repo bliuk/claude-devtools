@@ -62,6 +62,10 @@ export class SubagentResolver {
     // Link to Task calls using tool result data from parent session messages
     this.linkToTaskCalls(validSubagents, taskCalls, messages ?? []);
 
+    // Group nested subagents under the parent subagent that spawned them
+    // (a subagent whose parentTaskId is a tool_use inside another subagent's transcript).
+    this.assignNestedSubagents(validSubagents);
+
     // Propagate team metadata to continuation files via parentUuid chain
     this.propagateTeamMetadata(validSubagents);
 
@@ -240,9 +244,40 @@ export class SubagentResolver {
     const matchedSubagentIds = new Set<string>();
     const matchedTaskIds = new Set<string>();
 
+    // Phase 0: Naming-convention matching (.asa format, incl. nested subagents)
+    // .asa names subagent files agent-sub-{toolUseId}.jsonl, so agentId = "sub-{toolUseId}".
+    // Stripping the "sub-" prefix yields the spawning tool_use id directly, which is more
+    // reliable than Phase 1 here because .asa tool results carry no agentId field.
+    //
+    // The spawning tool_use may live in the parent session (top-level subagent) OR inside
+    // another subagent's transcript (nested subagent). So augment the task-call lookup with
+    // Task-like tool calls extracted from the subagent files themselves. This augmented map is
+    // used ONLY by Phase 0; Phases 1-3 keep operating on the original parent-session task calls.
+    const taskCallByIdWithNested = new Map(taskCallById);
+    for (const subagent of subagents) {
+      for (const msg of subagent.messages) {
+        for (const tc of msg.toolCalls) {
+          if (tc.isTask && !taskCallByIdWithNested.has(tc.id)) {
+            taskCallByIdWithNested.set(tc.id, tc);
+          }
+        }
+      }
+    }
+    for (const subagent of subagents) {
+      if (!subagent.id.startsWith('sub-')) continue;
+      const toolUseId = subagent.id.slice('sub-'.length);
+      const taskCall = taskCallByIdWithNested.get(toolUseId);
+      if (!taskCall) continue;
+
+      this.enrichSubagentFromTask(subagent, taskCall);
+      matchedSubagentIds.add(subagent.id);
+      matchedTaskIds.add(taskCall.id);
+    }
+
     // Phase 1: Result-based matching (agentId from tool results)
     // Works for regular subagents (Explore, etc.) where agentId = file UUID
     for (const subagent of subagents) {
+      if (matchedSubagentIds.has(subagent.id)) continue;
       const taskCallId = agentIdToTaskId.get(subagent.id);
       if (!taskCallId) continue;
 
@@ -325,6 +360,46 @@ export class SubagentResolver {
       subagent.team = { teamName, memberName, memberColor: '' };
     }
     /* eslint-enable no-param-reassign -- End of intentional mutation block */
+  }
+
+  /**
+   * Group nested subagents under their spawning parent subagent.
+   *
+   * A subagent is "nested" when the tool_use that spawned it (its parentTaskId) appears
+   * inside another subagent's transcript rather than in the parent session. This populates
+   * each parent's `nestedSubagents` array so the UI can render the full nesting tree
+   * (e.g. .asa: main -> subagent -> subagent). Works for arbitrary depth.
+   *
+   * Nested subagents are also left in the flat list (callers use it for aggregate metrics);
+   * chunk linking won't attach them to the top-level timeline because their parentTaskId is
+   * not present in the parent session's chunks.
+   */
+  private assignNestedSubagents(subagents: Process[]): void {
+    // Map: tool_use id -> the subagent whose transcript contains that Task-like call (spawner)
+    const spawnerByToolUseId = new Map<string, Process>();
+    for (const subagent of subagents) {
+      for (const msg of subagent.messages) {
+        for (const tc of msg.toolCalls) {
+          if (tc.isTask) {
+            spawnerByToolUseId.set(tc.id, subagent);
+          }
+        }
+      }
+    }
+
+    for (const subagent of subagents) {
+      if (!subagent.parentTaskId) continue;
+      const parent = spawnerByToolUseId.get(subagent.parentTaskId);
+      if (parent && parent !== subagent) {
+        parent.nestedSubagents ??= [];
+        parent.nestedSubagents.push(subagent);
+      }
+    }
+
+    // Keep nested children in chronological order
+    for (const subagent of subagents) {
+      subagent.nestedSubagents?.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+    }
   }
 
   /**

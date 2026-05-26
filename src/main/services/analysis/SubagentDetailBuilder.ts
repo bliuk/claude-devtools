@@ -16,7 +16,6 @@ import {
 } from '@main/types';
 import { countTokens } from '@main/utils/tokenizer';
 import { createLogger } from '@shared/utils/logger';
-import * as path from 'path';
 
 const logger = createLogger('Service:SubagentDetailBuilder');
 
@@ -42,48 +41,36 @@ import type { SessionParser } from '../parsing/SessionParser';
  */
 export async function buildSubagentDetail(
   projectId: string,
-  _sessionId: string, // Unused but kept for API consistency
+  sessionId: string,
   subagentId: string,
-  sessionParser: SessionParser,
+  _sessionParser: SessionParser, // Kept for API consistency; resolver now supplies parsed messages
   subagentResolver: SubagentResolver,
   buildChunksFn: (messages: ParsedMessage[], subagents: Process[]) => EnhancedChunk[],
-  fsProvider: FileSystemProvider,
-  projectsDir: string
+  _fsProvider: FileSystemProvider, // Kept for API consistency; path handling moved into resolver
+  _projectsDir: string
 ): Promise<SubagentDetail | null> {
   try {
-    // Construct path to subagent JSONL file
-    const subagentPath = path.join(
-      projectsDir,
-      projectId,
-      'subagents',
-      `agent-${subagentId}.jsonl`
-    );
+    // Resolve every subagent for the session (all nesting levels via the recursive locator),
+    // then locate the requested one by id. This uses the resolver's path handling instead of
+    // manually constructing a path, so it works for both .claude ({sessionId}/subagents/) and
+    // .asa nested ({sessionId}/subagents/run-N/subagents/) layouts.
+    const allSubagents = await subagentResolver.resolveSubagents(projectId, sessionId, []);
+    const target = subagentResolver.findSubagentById(allSubagents, subagentId);
 
-    // Check if file exists
-    if (!(await fsProvider.exists(subagentPath))) {
-      logger.warn(`Subagent file not found: ${subagentPath}`);
+    if (!target) {
+      logger.warn(`Subagent not found: ${subagentId} in session ${sessionId}`);
       return null;
     }
 
-    // Parse subagent JSONL file
-    const parsedSession = await sessionParser.parseSessionFile(subagentPath);
+    const messages = target.messages;
 
-    // Resolve nested subagents within this subagent
-    const nestedSubagents = await subagentResolver.resolveSubagents(
-      projectId,
-      subagentId, // Use subagentId as sessionId for nested resolution
-      parsedSession.taskCalls
-    );
+    // Build chunks with semantic steps; nested subagents are rendered within this subagent.
+    const chunks = buildChunksFn(messages, target.nestedSubagents ?? []);
 
-    // Build chunks with semantic steps
-    const chunks = buildChunksFn(parsedSession.messages, nestedSubagents);
-
-    // Extract description (try to get from first user message)
-    let description = 'Subagent';
-    if (parsedSession.messages.length > 0) {
-      const firstUserMsg = parsedSession.messages.find(
-        (m) => m.type === 'user' && typeof m.content === 'string'
-      );
+    // Prefer the description linked from the parent Task call; fall back to first user message.
+    let description = target.description ?? 'Subagent';
+    if (!target.description && messages.length > 0) {
+      const firstUserMsg = messages.find((m) => m.type === 'user' && typeof m.content === 'string');
       if (firstUserMsg && typeof firstUserMsg.content === 'string') {
         description = firstUserMsg.content.substring(0, 100);
         if (firstUserMsg.content.length > 100) {
@@ -93,14 +80,14 @@ export async function buildSubagentDetail(
     }
 
     // Calculate timing
-    const times = parsedSession.messages.map((m) => m.timestamp.getTime());
+    const times = messages.map((m) => m.timestamp.getTime());
     const startTime = new Date(Math.min(...times));
     const endTime = new Date(Math.max(...times));
     const duration = endTime.getTime() - startTime.getTime();
 
     // Calculate thinking tokens
     let thinkingTokens = 0;
-    for (const msg of parsedSession.messages) {
+    for (const msg of messages) {
       if (msg.type === 'assistant' && Array.isArray(msg.content)) {
         for (const block of msg.content) {
           if (block.type === 'thinking' && block.thinking) {
@@ -126,10 +113,10 @@ export async function buildSubagentDetail(
       endTime,
       duration,
       metrics: {
-        inputTokens: parsedSession.metrics.inputTokens,
-        outputTokens: parsedSession.metrics.outputTokens,
+        inputTokens: target.metrics.inputTokens,
+        outputTokens: target.metrics.outputTokens,
         thinkingTokens,
-        messageCount: parsedSession.metrics.messageCount,
+        messageCount: target.metrics.messageCount,
       },
     };
   } catch (error) {

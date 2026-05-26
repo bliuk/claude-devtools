@@ -28,9 +28,11 @@ import { type ContentBlock, type ToolUseResultData } from './jsonl';
 export interface ToolCall {
   /** Tool use ID for linking to results */
   id: string;
-  /** Tool name */
+  /** Tool name (normalized to Claude Code standard names, e.g. .asa "subagent" -> "Task") */
   name: string;
-  /** Tool input parameters */
+  /** Original tool name before normalization, when it differed (e.g. "subagent", "exec") */
+  rawName?: string;
+  /** Tool input parameters (normalized: standard keys backfilled, original keys preserved) */
   input: Record<string, unknown>;
   /** Whether this is a Task (subagent) tool call */
   isTask: boolean;

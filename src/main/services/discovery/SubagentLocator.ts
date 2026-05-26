@@ -88,17 +88,11 @@ export class SubagentLocator {
 
     try {
       // Scan NEW structure: {projectId}/{sessionId}/subagents/agent-*.jsonl
+      // Recurses into run-*/subagents/ to also collect nested subagents (.asa format,
+      // where a subagent that spawns its own subagents nests them under run-N/subagents/).
       const newSubagentsPath = this.getSubagentsPath(projectId, sessionId);
-      if (await this.fsProvider.exists(newSubagentsPath)) {
-        const entries = await this.fsProvider.readdir(newSubagentsPath);
-        const newFiles = entries
-          .filter(
-            (entry) =>
-              entry.isFile() && entry.name.startsWith('agent-') && entry.name.endsWith('.jsonl')
-          )
-          .map((entry) => path.join(newSubagentsPath, entry.name));
-        allFiles.push(...newFiles);
-      }
+      const newFiles = await this.collectSubagentFilesRecursive(newSubagentsPath, 0);
+      allFiles.push(...newFiles);
     } catch (error) {
       logger.error(`Error scanning NEW subagent structure for session ${sessionId}:`, error);
     }
@@ -113,6 +107,50 @@ export class SubagentLocator {
     }
 
     return allFiles;
+  }
+
+  /** Max nesting depth for "run-N/subagents" recursion (defensive against cycles). */
+  private static readonly MAX_NESTING_DEPTH = 10;
+
+  /**
+   * Collect agent-*.jsonl files from a subagents directory, recursing into
+   * nested "run-N/subagents" directories (.asa nested subagent layout).
+   *
+   * @param subagentsDir - A ".../subagents" directory to scan
+   * @param depth - Current recursion depth
+   * @returns Array of subagent file paths (this level + all nested levels)
+   */
+  private async collectSubagentFilesRecursive(
+    subagentsDir: string,
+    depth: number
+  ): Promise<string[]> {
+    if (depth > SubagentLocator.MAX_NESTING_DEPTH) {
+      return [];
+    }
+    if (!(await this.fsProvider.exists(subagentsDir))) {
+      return [];
+    }
+
+    const files: string[] = [];
+    let entries;
+    try {
+      entries = await this.fsProvider.readdir(subagentsDir);
+    } catch (error) {
+      logger.debug(`SubagentLocator: Could not read directory ${subagentsDir}:`, error);
+      return [];
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.startsWith('agent-') && entry.name.endsWith('.jsonl')) {
+        files.push(path.join(subagentsDir, entry.name));
+      } else if (entry.isDirectory() && entry.name.startsWith('run-')) {
+        // Nested subagents live under run-N/subagents/
+        const nestedDir = path.join(subagentsDir, entry.name, 'subagents');
+        files.push(...(await this.collectSubagentFilesRecursive(nestedDir, depth + 1)));
+      }
+    }
+
+    return files;
   }
 
   /**
